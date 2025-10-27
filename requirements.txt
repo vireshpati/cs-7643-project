@@ -2,7 +2,7 @@
 einops
 local-attention
 matplotlib
-numpy
+numpy==1.23.5
 pandas
 patool
 reformer-pytorch
