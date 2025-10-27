@@ -24,6 +24,14 @@ We evaluate our model on the following long-term forecasting datasets:
 
 Download the datasets from [[Google Drive]](https://drive.google.com/drive/folders/13Cg1KYOlzM5C7K8gK8NfC-F3EYxkM3D2?usp=sharing) and place them in `./Time-Series-Library/dataset`
 
+### Metrics 
+
+MSE, MAE 
+
+### Series Lengths
+
+96, 192, 384, 720 for all datasets
+
 ## Weights and Biases
 
 Use wandb to track the training and evaluation progress.
