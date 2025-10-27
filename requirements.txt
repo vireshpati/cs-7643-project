@@ -1,0 +1,16 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
+einops
+local-attention
+matplotlib
+numpy
+pandas
+patool
+reformer-pytorch
+scikit-learn
+scipy
+sktime
+sympy 
+torch
+tqdm
+PyWavelets 
+wandb
