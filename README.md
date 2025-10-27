@@ -37,11 +37,21 @@ MSE, MAE
 Use wandb to track the training and evaluation progress.
 
 ```
-export WANDB_API_KEY=
+export WANDB_API_KEY=wandb_api_key_here
 ```
 
 or
 
 ```
 wandb login
+```
+
+## Example Usage
+
+```
+conda create -n tslib python=3.10
+conda activate tslib
+pip install -r ./requirements.txt
+cd ./Time-Series-Library/
+bash ./scripts/long_term_forecast/ETT_script/Transformer_ETTh1_grid.sh
 ```
