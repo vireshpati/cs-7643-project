@@ -12,6 +12,8 @@ import numpy as np
 from utils.dtw_metric import dtw, accelerated_dtw
 from utils.augmentation import run_augmentation, run_augmentation_single
 
+import wandb
+
 warnings.filterwarnings('ignore')
 
 
@@ -81,6 +83,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         path = os.path.join(self.args.checkpoints, setting)
         if not os.path.exists(path):
             os.makedirs(path)
+
+        # Logging config
+        wandb_project = self.args.model
+        run_name = f"{self.args.model}-{self.args.seq_len}-{self.args.pred_len}"
+        wandb.init(
+            project=wandb_project,
+            name=run_name,
+            config=self.args,
+        )
+        wandb.watch(self.model, log="all", log_freq=100)
+
 
         time_now = time.time()
 
@@ -153,15 +166,38 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
                 epoch + 1, train_steps, train_loss, vali_loss, test_loss))
+
+            current_lr = model_optim.param_groups[0]['lr']
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "vali_loss": vali_loss,
+                "test_loss": test_loss,
+                "learning_rate": current_lr,
+            })
+
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
+                wandb.run.summary["early_stop_epoch"] = epoch + 1
                 break
 
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
+
+        try:
+            artifact = wandb.Artifact(run_name, type="model")
+            artifact.add_file(best_model_path)
+            wandb.log_artifact(artifact)
+        except Exception as e:
+            print(f"Error logging artifact: {e}")
+
+
+
+
+
 
         return self.model
 
@@ -264,5 +300,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
         np.save(folder_path + 'pred.npy', preds)
         np.save(folder_path + 'true.npy', trues)
+
+        if wandb.run is not None:
+            wandb.run.summary["mae"] = mae
+            wandb.run.summary["mse"] = mse
+            wandb.finish()
 
         return
