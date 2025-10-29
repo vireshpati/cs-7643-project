@@ -47,6 +47,7 @@ if __name__ == '__main__':
 
     # inputation task
     parser.add_argument('--mask_rate', type=float, default=0.25, help='mask ratio')
+    parser.add_argument('--ablation_rate', type=float, default=0.0, help='csv row ablation [0.0-1.0]')
 
     # anomaly detection task
     parser.add_argument('--anomaly_ratio', type=float, default=0.25, help='prior anomaly ratio (%%)')

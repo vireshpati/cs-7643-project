@@ -2,6 +2,8 @@ from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Data
     MSLSegLoader, SMAPSegLoader, SMDSegLoader, SWATSegLoader, UEAloader
 from data_provider.uea import collate_fn
 from torch.utils.data import DataLoader
+from utils.ablation import ablate_csv
+import os
 
 data_dict = {
     'ETTh1': Dataset_ETT_hour,
@@ -27,6 +29,19 @@ def data_provider(args, flag):
     drop_last = False
     batch_size = args.batch_size
     freq = args.freq
+
+    if hasattr(args, 'ablation_rate') and args.ablation_rate and args.ablation_rate > 0:
+        csv_datasets = {'ETTh1', 'ETTh2', 'ETTm1', 'ETTm2', 'custom'}
+        if args.data in csv_datasets and isinstance(getattr(args, 'data_path', None), str) and args.data_path.endswith('.csv'):
+            input_csv_path = os.path.join(args.root_path, args.data_path)
+            if os.path.exists(input_csv_path):
+                percent = round(args.ablation_rate * 100)
+                output_csv_path = input_csv_path.replace('.csv', f'_ablated_by_{percent}.csv')
+
+                if not os.path.exists(output_csv_path):
+                    ablate_csv(input_csv_path, args.ablation_rate)
+
+                args.data_path = os.path.basename(output_csv_path)
 
     if args.task_name == 'anomaly_detection':
         drop_last = False
