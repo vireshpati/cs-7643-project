@@ -3,6 +3,7 @@ from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Data
 from data_provider.uea import collate_fn
 from torch.utils.data import DataLoader
 from utils.ablation import ablate_csv
+from data_provider.time_encoding import TimeEncoding
 import os
 
 data_dict = {
@@ -23,7 +24,13 @@ data_dict = {
 
 def data_provider(args, flag):
     Data = data_dict[args.data]
-    timeenc = 0 if args.embed != 'timeF' else 1
+    embed_mode = getattr(args, 'embed', None)
+    if embed_mode == 'timeF':
+        timeenc = TimeEncoding.TIME_FEATURES
+    elif embed_mode == 'absolute':
+        timeenc = TimeEncoding.ABSOLUTE
+    else:
+        timeenc = TimeEncoding.NONE
 
     shuffle_flag = False if (flag == 'test' or flag == 'TEST') else True
     drop_last = False

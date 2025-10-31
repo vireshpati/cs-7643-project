@@ -12,6 +12,7 @@ from data_provider.uea import subsample, interpolate_missing, Normalizer
 from sktime.datasets import load_from_tsfile_to_dataframe
 import warnings
 from utils.augmentation import run_augmentation_single
+from data_provider.time_encoding import TimeEncoding, normalize_time_encoding
 
 warnings.filterwarnings('ignore')
 
@@ -19,7 +20,7 @@ warnings.filterwarnings('ignore')
 class Dataset_ETT_hour(Dataset):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
-                 target='OT', scale=True, timeenc=0, freq='h', seasonal_patterns=None):
+                 target='OT', scale=True, timeenc=TimeEncoding.NONE, freq='h', seasonal_patterns=None):
         # size [seq_len, label_len, pred_len]
         self.args = args
         # info
@@ -39,7 +40,7 @@ class Dataset_ETT_hour(Dataset):
         self.features = features
         self.target = target
         self.scale = scale
-        self.timeenc = timeenc
+        self.timeenc = normalize_time_encoding(timeenc)
         self.freq = freq
 
         self.root_path = root_path
@@ -71,15 +72,18 @@ class Dataset_ETT_hour(Dataset):
 
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
-        if self.timeenc == 0:
+        if self.timeenc is TimeEncoding.NONE:
             df_stamp['month'] = df_stamp.date.apply(lambda row: row.month, 1)
             df_stamp['day'] = df_stamp.date.apply(lambda row: row.day, 1)
             df_stamp['weekday'] = df_stamp.date.apply(lambda row: row.weekday(), 1)
             df_stamp['hour'] = df_stamp.date.apply(lambda row: row.hour, 1)
             data_stamp = df_stamp.drop(['date'], 1).values
-        elif self.timeenc == 1:
+        elif self.timeenc is TimeEncoding.TIME_FEATURES:
             data_stamp = time_features(pd.to_datetime(df_stamp['date'].values), freq=self.freq)
             data_stamp = data_stamp.transpose(1, 0) 
+        elif self.timeenc is TimeEncoding.ABSOLUTE:
+            timestamps = df_stamp['date'].astype('int64') / 1e9
+            data_stamp = (timestamps / 3600.0).values.reshape(-1, 1).astype(np.float32)
 
         self.data_x = data[border1:border2]
         self.data_y = data[border1:border2]
@@ -100,6 +104,11 @@ class Dataset_ETT_hour(Dataset):
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self.data_stamp[r_begin:r_end]
 
+        if self.timeenc is TimeEncoding.ABSOLUTE:
+            base_time = seq_x_mark[0, 0]
+            seq_x_mark = (seq_x_mark - base_time).astype(np.float32)
+            seq_y_mark = (seq_y_mark - base_time).astype(np.float32)
+
         return seq_x, seq_y, seq_x_mark, seq_y_mark
 
     def __len__(self):
@@ -112,7 +121,7 @@ class Dataset_ETT_hour(Dataset):
 class Dataset_ETT_minute(Dataset):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTm1.csv',
-                 target='OT', scale=True, timeenc=0, freq='t', seasonal_patterns=None):
+                 target='OT', scale=True, timeenc=TimeEncoding.NONE, freq='t', seasonal_patterns=None):
         # size [seq_len, label_len, pred_len]
         self.args = args
         # info
@@ -132,7 +141,7 @@ class Dataset_ETT_minute(Dataset):
         self.features = features
         self.target = target
         self.scale = scale
-        self.timeenc = timeenc
+        self.timeenc = normalize_time_encoding(timeenc)
         self.freq = freq
 
         self.root_path = root_path
@@ -164,7 +173,7 @@ class Dataset_ETT_minute(Dataset):
 
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
-        if self.timeenc == 0:
+        if self.timeenc is TimeEncoding.NONE:
             df_stamp['month'] = df_stamp.date.apply(lambda row: row.month, 1)
             df_stamp['day'] = df_stamp.date.apply(lambda row: row.day, 1)
             df_stamp['weekday'] = df_stamp.date.apply(lambda row: row.weekday(), 1)
@@ -172,9 +181,12 @@ class Dataset_ETT_minute(Dataset):
             df_stamp['minute'] = df_stamp.date.apply(lambda row: row.minute, 1)
             df_stamp['minute'] = df_stamp.minute.map(lambda x: x // 15)
             data_stamp = df_stamp.drop(['date'], 1).values
-        elif self.timeenc == 1:
+        elif self.timeenc is TimeEncoding.TIME_FEATURES:
             data_stamp = time_features(pd.to_datetime(df_stamp['date'].values), freq=self.freq)
             data_stamp = data_stamp.transpose(1, 0)
+        elif self.timeenc is TimeEncoding.ABSOLUTE:
+            timestamps = df_stamp['date'].astype('int64') / 1e9
+            data_stamp = (timestamps / 3600.0).values.reshape(-1, 1).astype(np.float32)
 
         self.data_x = data[border1:border2]
         self.data_y = data[border1:border2]
@@ -195,6 +207,11 @@ class Dataset_ETT_minute(Dataset):
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self.data_stamp[r_begin:r_end]
 
+        if self.timeenc is TimeEncoding.ABSOLUTE:
+            base_time = seq_x_mark[0, 0]
+            seq_x_mark = (seq_x_mark - base_time).astype(np.float32)
+            seq_y_mark = (seq_y_mark - base_time).astype(np.float32)
+
         return seq_x, seq_y, seq_x_mark, seq_y_mark
 
     def __len__(self):
@@ -207,7 +224,7 @@ class Dataset_ETT_minute(Dataset):
 class Dataset_Custom(Dataset):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
-                 target='OT', scale=True, timeenc=0, freq='h', seasonal_patterns=None):
+                 target='OT', scale=True, timeenc=TimeEncoding.NONE, freq='h', seasonal_patterns=None):
         # size [seq_len, label_len, pred_len]
         self.args = args
         # info
@@ -227,7 +244,7 @@ class Dataset_Custom(Dataset):
         self.features = features
         self.target = target
         self.scale = scale
-        self.timeenc = timeenc
+        self.timeenc = normalize_time_encoding(timeenc)
         self.freq = freq
 
         self.root_path = root_path
@@ -269,15 +286,18 @@ class Dataset_Custom(Dataset):
 
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
-        if self.timeenc == 0:
+        if self.timeenc is TimeEncoding.NONE:
             df_stamp['month'] = df_stamp.date.apply(lambda row: row.month, 1)
             df_stamp['day'] = df_stamp.date.apply(lambda row: row.day, 1)
             df_stamp['weekday'] = df_stamp.date.apply(lambda row: row.weekday(), 1)
             df_stamp['hour'] = df_stamp.date.apply(lambda row: row.hour, 1)
             data_stamp = df_stamp.drop(['date'], 1).values
-        elif self.timeenc == 1:
+        elif self.timeenc is TimeEncoding.TIME_FEATURES:
             data_stamp = time_features(pd.to_datetime(df_stamp['date'].values), freq=self.freq)
             data_stamp = data_stamp.transpose(1, 0)
+        elif self.timeenc is TimeEncoding.ABSOLUTE:
+            timestamps = df_stamp['date'].astype('int64') / 1e9
+            data_stamp = (timestamps / 3600.0).values.reshape(-1, 1).astype(np.float32)
 
         self.data_x = data[border1:border2]
         self.data_y = data[border1:border2]
@@ -298,6 +318,11 @@ class Dataset_Custom(Dataset):
         seq_x_mark = self.data_stamp[s_begin:s_end]
         seq_y_mark = self.data_stamp[r_begin:r_end]
 
+        if self.timeenc is TimeEncoding.ABSOLUTE:
+            base_time = seq_x_mark[0, 0]
+            seq_x_mark = (seq_x_mark - base_time).astype(np.float32)
+            seq_y_mark = (seq_y_mark - base_time).astype(np.float32)
+
         return seq_x, seq_y, seq_x_mark, seq_y_mark
 
     def __len__(self):
@@ -310,7 +335,7 @@ class Dataset_Custom(Dataset):
 class Dataset_M4(Dataset):
     def __init__(self, args, root_path, flag='pred', size=None,
                  features='S', data_path='ETTh1.csv',
-                 target='OT', scale=False, inverse=False, timeenc=0, freq='15min',
+                 target='OT', scale=False, inverse=False, timeenc=TimeEncoding.NONE, freq='15min',
                  seasonal_patterns='Yearly'):
         # size [seq_len, label_len, pred_len]
         # init
@@ -318,7 +343,7 @@ class Dataset_M4(Dataset):
         self.target = target
         self.scale = scale
         self.inverse = inverse
-        self.timeenc = timeenc
+        self.timeenc = normalize_time_encoding(timeenc)
         self.root_path = root_path
 
         self.seq_len = size[0]
