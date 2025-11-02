@@ -216,6 +216,34 @@ class AttentionLayer(nn.Module):
         self.n_heads = n_heads
         self.positional_encoding = positional_encoding
         self.max_pos_len = max_pos_len
+        if positional_encoding == 'rope':
+            if d_keys % 2 != 0:
+                raise ValueError("RoPE requires an even head dimension.")
+            inv_freq = 1.0 / (10000 ** (torch.arange(0, d_keys, 2).float() / d_keys))
+            self.register_buffer('rope_inv_freq', inv_freq, persistent=False)
+        else:
+            self.rope_inv_freq = None
+
+    def _build_rope_cache(self, seq_len, device):
+        inv_freq = self.rope_inv_freq.to(device)
+        positions = torch.arange(seq_len, device=device).float()
+        sinusoid_inp = torch.einsum('i,j->ij', positions, inv_freq)
+        sin = torch.sin(sinusoid_inp)
+        cos = torch.cos(sinusoid_inp)
+        sin = torch.repeat_interleave(sin, repeats=2, dim=-1)
+        cos = torch.repeat_interleave(cos, repeats=2, dim=-1)
+        sin = sin.unsqueeze(0).unsqueeze(2)
+        cos = cos.unsqueeze(0).unsqueeze(2)
+        return sin, cos
+
+    @staticmethod
+    def _apply_rope(x, sin, cos):
+        x_even = x[..., ::2]
+        x_odd = x[..., 1::2]
+        rotated = torch.zeros_like(x)
+        rotated[..., ::2] = -x_odd
+        rotated[..., 1::2] = x_even
+        return (x * cos) + (rotated * sin)
 
     def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
         B, L, _ = queries.shape
@@ -225,6 +253,12 @@ class AttentionLayer(nn.Module):
         queries = self.query_projection(queries).view(B, L, H, -1)
         keys = self.key_projection(keys).view(B, S, H, -1)
         values = self.value_projection(values).view(B, S, H, -1)
+
+        if self.positional_encoding == 'rope':
+            sin_q, cos_q = self._build_rope_cache(L, queries.device)
+            sin_k, cos_k = self._build_rope_cache(S, keys.device)
+            queries = self._apply_rope(queries, sin_q, cos_q)
+            keys = self._apply_rope(keys, sin_k, cos_k)
 
         out, attn = self.inner_attention(
             queries,
