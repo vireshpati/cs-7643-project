@@ -86,7 +86,15 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         # Logging config
         wandb_project = self.args.model
-        run_name = f"{self.args.model}-{self.args.seq_len}-{self.args.pred_len}"
+        ablation_pct = int(round(getattr(self.args, "ablation_rate", 0.0) * 100))
+        run_name = (
+            f"{self.args.model}-"
+            f"{self.args.data}-"
+            f"sl{self.args.seq_len}-"
+            f"pl{self.args.pred_len}-"
+            f"abl{ablation_pct}-"
+            f"pe{getattr(self.args, 'positional_encoding', 'absolute')}"
+        )
         wandb.init(
             project=wandb_project,
             name=run_name,
