@@ -46,12 +46,24 @@ class DSAttention(nn.Module):
 
 
 class FullAttention(nn.Module):
-    def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False):
+    def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1,
+                 output_attention=False, positional_encoding='sinusoidal', max_pos_len=5000):
         super(FullAttention, self).__init__()
         self.scale = scale
         self.mask_flag = mask_flag
         self.output_attention = output_attention
         self.dropout = nn.Dropout(attention_dropout)
+        self.positional_encoding = positional_encoding
+        self.max_pos_len = max_pos_len
+        self.rel_pos_embedding = None
+
+    def _get_relative_positions(self, q_len, k_len, device):
+        range_q = torch.arange(q_len, device=device)
+        range_k = torch.arange(k_len, device=device)
+        relative_position = range_k[None, :] - range_q[:, None]
+        relative_position += self.max_pos_len - 1
+        max_index = 2 * self.max_pos_len - 2
+        return relative_position.clamp(0, max_index)
 
     def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
         B, L, H, E = queries.shape
@@ -60,19 +72,31 @@ class FullAttention(nn.Module):
 
         scores = torch.einsum("blhe,bshe->bhls", queries, keys)
 
+        rel_emb = None
+        if self.positional_encoding == 'relative':
+            if self.rel_pos_embedding is None or self.rel_pos_embedding.embedding_dim != E:
+                self.rel_pos_embedding = nn.Embedding(2 * self.max_pos_len - 1, E).to(queries.device)
+            rel_indices = self._get_relative_positions(L, S, queries.device)
+            rel_emb = self.rel_pos_embedding(rel_indices)  # [L, S, E]
+            scores = scores + torch.einsum("blhe,lse->bhls", queries, rel_emb)
+
         if self.mask_flag:
             if attn_mask is None:
                 attn_mask = TriangularCausalMask(B, L, device=queries.device)
 
             scores.masked_fill_(attn_mask.mask, -np.inf)
 
-        A = self.dropout(torch.softmax(scale * scores, dim=-1))
-        V = torch.einsum("bhls,bshd->blhd", A, values)
+        A = torch.softmax(scale * scores, dim=-1)
+        A = self.dropout(A)
+
+        context = torch.einsum("bhls,bshd->blhd", A, values)
+        if rel_emb is not None:
+            context = context + torch.einsum("bhls,lse->blhe", A, rel_emb)
 
         if self.output_attention:
-            return V.contiguous(), A
+            return context.contiguous(), A
         else:
-            return V.contiguous(), None
+            return context.contiguous(), None
 
 
 class ProbAttention(nn.Module):
@@ -178,7 +202,7 @@ class ProbAttention(nn.Module):
 
 class AttentionLayer(nn.Module):
     def __init__(self, attention, d_model, n_heads, d_keys=None,
-                 d_values=None):
+                 d_values=None, positional_encoding='sinusoidal', max_pos_len=5000):
         super(AttentionLayer, self).__init__()
 
         d_keys = d_keys or (d_model // n_heads)
@@ -190,6 +214,8 @@ class AttentionLayer(nn.Module):
         self.value_projection = nn.Linear(d_model, d_values * n_heads)
         self.out_projection = nn.Linear(d_values * n_heads, d_model)
         self.n_heads = n_heads
+        self.positional_encoding = positional_encoding
+        self.max_pos_len = max_pos_len
 
     def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
         B, L, _ = queries.shape

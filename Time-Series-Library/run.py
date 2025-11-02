@@ -73,6 +73,10 @@ if __name__ == '__main__':
     parser.add_argument('--dropout', type=float, default=0.1, help='dropout')
     parser.add_argument('--embed', type=str, default='timeF',
                         help='time features encoding, options:[timeF, fixed, learned]')
+    parser.add_argument('--positional_encoding', type=str, default='sinusoidal',
+                        help='positional encoding type: sinusoidal, learned, relative, rope')
+    parser.add_argument('--max_pos_len', type=int, default=2048,
+                        help='maximum position length supported by positional encodings')
     parser.add_argument('--activation', type=str, default='gelu', help='activation')
     parser.add_argument('--channel_independence', type=int, default=1,
                         help='0: channel dependence 1: channel independence for FreTS model')

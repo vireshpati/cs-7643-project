@@ -26,6 +26,20 @@ class PositionalEmbedding(nn.Module):
         return self.pe[:, :x.size(1)]
 
 
+class LearnedPositionalEmbedding(nn.Module):
+    def __init__(self, max_len, d_model):
+        super(LearnedPositionalEmbedding, self).__init__()
+        self.max_len = max_len
+        self.embedding = nn.Embedding(max_len, d_model)
+
+    def forward(self, x):
+        seq_len = x.size(1)
+        if seq_len > self.max_len:
+            raise ValueError(f"Sequence length {seq_len} exceeds learned positional embedding limit {self.max_len}.")
+        positions = torch.arange(seq_len, device=x.device)
+        return self.embedding(positions).unsqueeze(0)
+
+
 class TokenEmbedding(nn.Module):
     def __init__(self, c_in, d_model):
         super(TokenEmbedding, self).__init__()
@@ -107,22 +121,33 @@ class TimeFeatureEmbedding(nn.Module):
 
 
 class DataEmbedding(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1,
+                 positional_encoding='sinusoidal', max_pos_len=5000):
         super(DataEmbedding, self).__init__()
 
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
-        self.position_embedding = PositionalEmbedding(d_model=d_model)
+
+        if positional_encoding == 'learned':
+            self.position_embedding = LearnedPositionalEmbedding(max_pos_len, d_model)
+        elif positional_encoding == 'sinusoidal':
+            self.position_embedding = PositionalEmbedding(d_model=d_model, max_len=max_pos_len)
+        else:
+            self.position_embedding = None
+
         self.temporal_embedding = TemporalEmbedding(d_model=d_model, embed_type=embed_type,
                                                     freq=freq) if embed_type != 'timeF' else TimeFeatureEmbedding(
             d_model=d_model, embed_type=embed_type, freq=freq)
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x, x_mark):
-        if x_mark is None:
-            x = self.value_embedding(x) + self.position_embedding(x)
-        else:
-            x = self.value_embedding(
-                x) + self.temporal_embedding(x_mark) + self.position_embedding(x)
+        x = self.value_embedding(x)
+
+        if self.position_embedding is not None:
+            x = x + self.position_embedding(x)
+
+        if x_mark is not None:
+            x = x + self.temporal_embedding(x_mark)
+
         return self.dropout(x)
 
 

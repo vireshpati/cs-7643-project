@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
-# Run the vanilla Transformer with absolute (sinusoidal) positional encodings
-# across every long-term forecasting dataset we track. The grid is shared
-# across datasets so results can be dropped straight into the milestone table.
+# Run Transformer with relative positional encoding across all long-term
+# forecasting datasets using the shared grid.
 
 set -euo pipefail
 
@@ -10,6 +9,7 @@ model_name=Transformer
 pred_lens=(96 192 336 720)
 enc_layers=(2)
 dec_layers=(1)
+positional_flag=(--positional_encoding relative)
 
 run_transformer_grid() {
   local model_prefix=$1
@@ -33,7 +33,7 @@ run_transformer_grid() {
           --is_training 1 \
           --root_path "${root_path}" \
           --data_path "${data_path}" \
-          --model_id "${model_prefix}_${seq_len}_${pred_len}" \
+          --model_id "${model_prefix}_${seq_len}_${pred_len}_rel" \
           --model "${model_name}" \
           --data "${data_flag}" \
           --features "${features}" \
@@ -47,6 +47,7 @@ run_transformer_grid() {
           --c_out "${c_out}" \
           --des 'Exp' \
           --itr 1 \
+          "${positional_flag[@]}" \
           "${extra_args[@]}"
       done
     done

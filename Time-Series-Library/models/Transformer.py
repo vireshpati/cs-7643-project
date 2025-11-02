@@ -19,15 +19,28 @@ class Model(nn.Module):
         self.task_name = configs.task_name
         self.pred_len = configs.pred_len
         # Embedding
-        self.enc_embedding = DataEmbedding(configs.enc_in, configs.d_model, configs.embed, configs.freq,
-                                           configs.dropout)
+        self.enc_embedding = DataEmbedding(
+            configs.enc_in,
+            configs.d_model,
+            configs.embed,
+            configs.freq,
+            configs.dropout,
+            positional_encoding=configs.positional_encoding,
+            max_pos_len=configs.max_pos_len,
+        )
         # Encoder
         self.encoder = Encoder(
             [
                 EncoderLayer(
                     AttentionLayer(
                         FullAttention(False, configs.factor, attention_dropout=configs.dropout,
-                                      output_attention=False), configs.d_model, configs.n_heads),
+                                      output_attention=False,
+                                      positional_encoding=configs.positional_encoding,
+                                      max_pos_len=configs.max_pos_len),
+                        configs.d_model,
+                        configs.n_heads,
+                        positional_encoding=configs.positional_encoding,
+                        max_pos_len=configs.max_pos_len),
                     configs.d_model,
                     configs.d_ff,
                     dropout=configs.dropout,
@@ -39,18 +52,30 @@ class Model(nn.Module):
         # Decoder
         if self.task_name == 'long_term_forecast' or self.task_name == 'short_term_forecast':
             self.dec_embedding = DataEmbedding(configs.dec_in, configs.d_model, configs.embed, configs.freq,
-                                               configs.dropout)
+                                               configs.dropout,
+                                               positional_encoding=configs.positional_encoding,
+                                               max_pos_len=configs.max_pos_len)
             self.decoder = Decoder(
                 [
                     DecoderLayer(
                         AttentionLayer(
                             FullAttention(True, configs.factor, attention_dropout=configs.dropout,
-                                          output_attention=False),
-                            configs.d_model, configs.n_heads),
+                                          output_attention=False,
+                                          positional_encoding=configs.positional_encoding,
+                                          max_pos_len=configs.max_pos_len),
+                            configs.d_model,
+                            configs.n_heads,
+                            positional_encoding=configs.positional_encoding,
+                            max_pos_len=configs.max_pos_len),
                         AttentionLayer(
                             FullAttention(False, configs.factor, attention_dropout=configs.dropout,
-                                          output_attention=False),
-                            configs.d_model, configs.n_heads),
+                                          output_attention=False,
+                                          positional_encoding=configs.positional_encoding,
+                                          max_pos_len=configs.max_pos_len),
+                            configs.d_model,
+                            configs.n_heads,
+                            positional_encoding=configs.positional_encoding,
+                            max_pos_len=configs.max_pos_len),
                         configs.d_model,
                         configs.d_ff,
                         dropout=configs.dropout,
