@@ -10,6 +10,7 @@ model_name=Transformer
 pred_lens=(96 192 336 720)
 enc_layers=(2)
 dec_layers=(1)
+ablation_rates=(0.0 0.25 0.5)
 
 run_transformer_grid() {
   local model_prefix=$1
@@ -25,29 +26,33 @@ run_transformer_grid() {
   shift 10
   local extra_args=("$@")
 
-  for pred_len in "${pred_lens[@]}"; do
-    for e_layers in "${enc_layers[@]}"; do
-      for d_layers in "${dec_layers[@]}"; do
-        python -u run.py \
-          --task_name long_term_forecast \
-          --is_training 1 \
-          --root_path "${root_path}" \
-          --data_path "${data_path}" \
-          --model_id "${model_prefix}_${seq_len}_${pred_len}" \
-          --model "${model_name}" \
-          --data "${data_flag}" \
-          --features "${features}" \
-          --seq_len "${seq_len}" \
-          --label_len "${label_len}" \
-          --pred_len "${pred_len}" \
-          --e_layers "${e_layers}" \
-          --d_layers "${d_layers}" \
-          --enc_in "${enc_in}" \
-          --dec_in "${dec_in}" \
-          --c_out "${c_out}" \
-          --des 'Exp' \
-          --itr 1 \
-          "${extra_args[@]}"
+  for ablation in "${ablation_rates[@]}"; do
+    ablation_suffix=${ablation/./}
+    for pred_len in "${pred_lens[@]}"; do
+      for e_layers in "${enc_layers[@]}"; do
+        for d_layers in "${dec_layers[@]}"; do
+          python -u run.py \
+            --task_name long_term_forecast \
+            --is_training 1 \
+            --root_path "${root_path}" \
+            --data_path "${data_path}" \
+            --model_id "${model_prefix}_${seq_len}_${pred_len}_abl${ablation_suffix}" \
+            --model "${model_name}" \
+            --data "${data_flag}" \
+            --features "${features}" \
+            --seq_len "${seq_len}" \
+            --label_len "${label_len}" \
+            --pred_len "${pred_len}" \
+            --e_layers "${e_layers}" \
+            --d_layers "${d_layers}" \
+            --enc_in "${enc_in}" \
+            --dec_in "${dec_in}" \
+            --c_out "${c_out}" \
+            --des 'Exp' \
+            --itr 1 \
+            --ablation_rate "${ablation}" \
+            "${extra_args[@]}"
+        done
       done
     done
   done
