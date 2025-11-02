@@ -32,7 +32,12 @@ def data_provider(args, flag):
 
     if hasattr(args, 'ablation_rate') and args.ablation_rate and args.ablation_rate > 0:
         csv_datasets = {'ETTh1', 'ETTh2', 'ETTm1', 'ETTm2', 'custom'}
-        if args.data in csv_datasets and isinstance(getattr(args, 'data_path', None), str) and args.data_path.endswith('.csv'):
+        if (
+            args.data in csv_datasets
+            and isinstance(getattr(args, 'data_path', None), str)
+            and args.data_path.endswith('.csv')
+            and '_ablated_by_' not in args.data_path
+        ):
             input_csv_path = os.path.join(args.root_path, args.data_path)
             if os.path.exists(input_csv_path):
                 percent = round(args.ablation_rate * 100)
