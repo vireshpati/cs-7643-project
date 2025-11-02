@@ -30,6 +30,16 @@ def data_provider(args, flag):
     batch_size = args.batch_size
     freq = args.freq
 
+    if not hasattr(args, '_original_data_path'):
+        args._original_data_path = args.data_path
+
+    ablation_applied = False
+
+    if not hasattr(args, '_original_data_path'):
+        args._original_data_path = args.data_path
+
+    ablation_applied = False
+
     if hasattr(args, 'ablation_rate') and args.ablation_rate and args.ablation_rate > 0:
         csv_datasets = {'ETTh1', 'ETTh2', 'ETTm1', 'ETTm2', 'custom'}
         if (
@@ -47,6 +57,8 @@ def data_provider(args, flag):
                     ablate_csv(input_csv_path, args.ablation_rate)
 
                 args.data_path = os.path.basename(output_csv_path)
+                ablation_applied = True
+                ablation_applied = True
 
     if args.task_name == 'anomaly_detection':
         drop_last = False
@@ -84,19 +96,31 @@ def data_provider(args, flag):
     else:
         if args.data == 'm4':
             drop_last = False
-        data_set = Data(
-            args = args,
-            root_path=args.root_path,
-            data_path=args.data_path,
-            flag=flag,
-            size=[args.seq_len, args.label_len, args.pred_len],
-            features=args.features,
-            target=args.target,
-            timeenc=timeenc,
-            freq=freq,
-            seasonal_patterns=args.seasonal_patterns
-        )
-        print(flag, len(data_set))
+        try:
+            data_set = Data(
+                args = args,
+                root_path=args.root_path,
+                data_path=args.data_path,
+                flag=flag,
+                size=[args.seq_len, args.label_len, args.pred_len],
+                features=args.features,
+                target=args.target,
+                timeenc=timeenc,
+                freq=freq,
+                seasonal_patterns=args.seasonal_patterns
+            )
+            dataset_len = len(data_set)
+            if dataset_len <= 0:
+                raise ValueError("Non-positive dataset length after ablation.")
+        except ValueError as err:
+            if ablation_applied:
+                print(f"Warning: ablation_rate={args.ablation_rate} removed too many rows for dataset {args.data}. "
+                      f"Reverting to original data file.")
+                args.data_path = args._original_data_path
+                args.ablation_rate = 0.0
+                return data_provider(args, flag)
+            raise err
+        print(flag, dataset_len)
         data_loader = DataLoader(
             data_set,
             batch_size=batch_size,

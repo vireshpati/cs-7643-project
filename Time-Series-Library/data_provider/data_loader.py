@@ -16,6 +16,41 @@ from utils.augmentation import run_augmentation_single
 warnings.filterwarnings('ignore')
 
 
+def _compute_ett_borders(total_len, seq_len, pred_len, train_ratio=0.6, val_ratio=0.2):
+    """Compute dynamic train/val/test borders that remain valid after ablation."""
+    min_block = seq_len + pred_len
+    if total_len < min_block * 3:
+        raise ValueError("Insufficient data to create train/val/test splits after ablation.")
+
+    train_len = max(int(total_len * train_ratio), min_block)
+    remaining = total_len - train_len
+    if remaining < 2 * min_block:
+        train_len = max(total_len - 2 * min_block, min_block)
+        remaining = total_len - train_len
+        if remaining < 2 * min_block:
+            raise ValueError("Insufficient data remaining for validation/test splits after ablation.")
+
+    test_ratio = 1 - train_ratio - val_ratio
+    ratio_denom = val_ratio + max(test_ratio, 0)
+    if ratio_denom == 0:
+        raise ValueError("Invalid ratio configuration for ETT dataset splitting.")
+    val_len = max(int(remaining * (val_ratio / ratio_denom)), min_block)
+    test_len = remaining - val_len
+    if test_len < min_block:
+        deficit = min_block - test_len
+        val_len -= deficit
+        test_len += deficit
+        if val_len < min_block:
+            raise ValueError("Validation split became too small after ablation.")
+
+    border1s = [0, train_len - seq_len, train_len + val_len - seq_len]
+    border1s[1] = max(border1s[1], 0)
+    border1s[2] = max(border1s[2], 0)
+    border2s = [train_len, train_len + val_len, train_len + val_len + test_len]
+    border2s[-1] = total_len
+    return border1s, border2s
+
+
 class Dataset_ETT_hour(Dataset):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
@@ -51,8 +86,8 @@ class Dataset_ETT_hour(Dataset):
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
 
-        border1s = [0, 12 * 30 * 24 - self.seq_len, 12 * 30 * 24 + 4 * 30 * 24 - self.seq_len]
-        border2s = [12 * 30 * 24, 12 * 30 * 24 + 4 * 30 * 24, 12 * 30 * 24 + 8 * 30 * 24]
+        total_len = len(df_raw)
+        border1s, border2s = _compute_ett_borders(total_len, self.seq_len, self.pred_len, train_ratio=0.6, val_ratio=0.2)
         border1 = border1s[self.set_type]
         border2 = border2s[self.set_type]
 
@@ -144,8 +179,8 @@ class Dataset_ETT_minute(Dataset):
         df_raw = pd.read_csv(os.path.join(self.root_path,
                                           self.data_path))
 
-        border1s = [0, 12 * 30 * 24 * 4 - self.seq_len, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4 - self.seq_len]
-        border2s = [12 * 30 * 24 * 4, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4, 12 * 30 * 24 * 4 + 8 * 30 * 24 * 4]
+        total_len = len(df_raw)
+        border1s, border2s = _compute_ett_borders(total_len, self.seq_len, self.pred_len, train_ratio=0.6, val_ratio=0.2)
         border1 = border1s[self.set_type]
         border2 = border2s[self.set_type]
 
