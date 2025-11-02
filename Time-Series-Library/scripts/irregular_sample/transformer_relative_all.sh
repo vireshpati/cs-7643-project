@@ -11,6 +11,8 @@ enc_layers=(2)
 dec_layers=(1)
 positional_flag=(--positional_encoding relative)
 ablation_rates=(0.0 0.25 0.5)
+state_file="$(dirname "$0")/state_transformer_relative_all.txt"
+touch "${state_file}"
 
 run_transformer_grid() {
   local model_prefix=$1
@@ -31,6 +33,11 @@ run_transformer_grid() {
     for pred_len in "${pred_lens[@]}"; do
       for e_layers in "${enc_layers[@]}"; do
         for d_layers in "${dec_layers[@]}"; do
+          local run_key="${data_flag}|${ablation}|${pred_len}|${e_layers}|${d_layers}"
+          if grep -qx "${run_key}" "${state_file}"; then
+            echo "Skipping completed run ${run_key}"
+            continue
+          fi
           python -u run.py \
             --task_name long_term_forecast \
             --is_training 1 \
@@ -53,6 +60,12 @@ run_transformer_grid() {
             --ablation_rate "${ablation}" \
             "${positional_flag[@]}" \
             "${extra_args[@]}"
+          if [[ $? -eq 0 ]]; then
+            echo "${run_key}" >> "${state_file}"
+          else
+            echo "Run failed for ${run_key}, stopping script."
+            exit 1
+          fi
         done
       done
     done
