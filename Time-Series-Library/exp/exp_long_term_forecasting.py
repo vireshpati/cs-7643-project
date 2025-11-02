@@ -33,12 +33,34 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return data_set, data_loader
 
     def _select_optimizer(self):
-        model_optim = optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
+        model_optim = optim.AdamW(self.model.parameters(), lr=self.args.learning_rate, betas=(0.9, 0.95),weight_decay=1e-1) #nanoGPT configuration: https://github.com/karpathy/nanoGPT/
         return model_optim
 
     def _select_criterion(self):
         criterion = nn.MSELoss()
         return criterion
+
+    def _get_lr_scheduler(self, optimizer, train_steps):
+
+        warmup_epochs=getattr(self.args, "warmup_epochs", 2)
+
+        def lr_lambda(current_epoch):
+            total_steps=self.args.train_epochs * train_steps
+            warmup_steps=warmup_epochs * train_steps
+            
+            #Linear warmup
+            if current_epoch < warmup_steps:
+                return float(current_epoch) / float(max(1, warmup_steps))
+         
+            # Linear decay
+            progrss = float(current_epoch - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return max(0.0, (1.0-progrss))
+        
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        return scheduler
+      
+        
+
  
 
     def vali(self, vali_data, vali_loader, criterion):
@@ -105,6 +127,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
+        scheduler = self._get_lr_scheduler(model_optim, train_steps)
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -126,6 +149,15 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
                 dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+
+                # Random dropping
+                drop_mask = None
+                if torch.rand(1).item() > 0:
+                    random_drop_rate = torch.rand(1).item()
+                    drop_mask = torch.rand(1, 1, batch_x.shape[2], device=batch_x.device) < 1-random_drop_rate
+                    batch_x = batch_x.masked_fill(drop_mask, 0)
+                    batch_y = batch_y.masked_fill(drop_mask, 0)
+                    batch_x_mark = batch_x_mark.masked_fill(torch.rand(1, 1, batch_x_mark.shape[2], device=batch_x_mark.device) < 1-random_drop_rate, 0)
 
                 # encoder - decoder
                 if self.args.use_amp:
@@ -161,6 +193,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 else:
                     loss.backward()
                     model_optim.step()
+                scheduler.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
