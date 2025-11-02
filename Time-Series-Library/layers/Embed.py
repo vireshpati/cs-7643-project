@@ -26,20 +26,6 @@ class PositionalEmbedding(nn.Module):
         return self.pe[:, :x.size(1)]
 
 
-class LearnedPositionalEmbedding(nn.Module):
-    def __init__(self, max_len, d_model):
-        super(LearnedPositionalEmbedding, self).__init__()
-        self.max_len = max_len
-        self.embedding = nn.Embedding(max_len, d_model)
-
-    def forward(self, x):
-        seq_len = x.size(1)
-        if seq_len > self.max_len:
-            raise ValueError(f"Sequence length {seq_len} exceeds learned positional embedding limit {self.max_len}.")
-        positions = torch.arange(seq_len, device=x.device)
-        return self.embedding(positions).unsqueeze(0)
-
-
 class TokenEmbedding(nn.Module):
     def __init__(self, c_in, d_model):
         super(TokenEmbedding, self).__init__()
@@ -127,9 +113,7 @@ class DataEmbedding(nn.Module):
 
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
 
-        if positional_encoding == 'learned':
-            self.position_embedding = LearnedPositionalEmbedding(max_pos_len, d_model)
-        elif positional_encoding == 'sinusoidal':
+        if positional_encoding == 'absolute':
             self.position_embedding = PositionalEmbedding(d_model=d_model, max_len=max_pos_len)
         else:
             self.position_embedding = None
