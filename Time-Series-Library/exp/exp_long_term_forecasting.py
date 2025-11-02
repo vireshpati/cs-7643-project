@@ -87,7 +87,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         # Logging config
         wandb_project = self.args.model
         run_name = f"{self.args.model}-{self.args.seq_len}-{self.args.pred_len}"
+        if self.args.des != 'test':
+            run_name = f"{self.args.model}-{self.args.seq_len}-{self.args.pred_len}-{self.args.des[:10]}"
         wandb.init(
+            entity='CS7643F25',
             project=wandb_project,
             name=run_name,
             config=self.args,
