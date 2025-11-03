@@ -109,8 +109,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                # Handle irregular sampling: outputs may have variable length
+                actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                outputs = outputs[:, -actual_pred_len:, f_dim:]
+                batch_y = batch_y[:, -actual_pred_len:, f_dim:].to(self.device)
 
                 pred = outputs.detach()
                 true = batch_y.detach()
@@ -211,8 +213,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                         f_dim = -1 if self.args.features == 'MS' else 0
-                        outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                        # Handle irregular sampling: outputs may have variable length
+                        actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                        outputs = outputs[:, -actual_pred_len:, f_dim:]
+                        batch_y = batch_y[:, -actual_pred_len:, f_dim:].to(self.device)
                         loss = criterion(outputs, batch_y)
                         train_loss.append(loss.item())
                 else:
@@ -223,8 +227,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                     f_dim = -1 if self.args.features == 'MS' else 0
-                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    # Handle irregular sampling: outputs may have variable length
+                    actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                    outputs = outputs[:, -actual_pred_len:, f_dim:]
+                    batch_y = batch_y[:, -actual_pred_len:, f_dim:].to(self.device)
                     loss = criterion(outputs, batch_y)
                     train_loss.append(loss.item())
 
@@ -347,10 +353,19 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, :]
-                batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+                # Handle irregular sampling: outputs may have variable length
+                actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                outputs = outputs[:, -actual_pred_len:, :]
+                batch_y = batch_y[:, -actual_pred_len:, :].to(self.device)
                 outputs = outputs.detach().cpu().numpy()
                 batch_y = batch_y.detach().cpu().numpy()
+
+                # Pad predictions to pred_len if needed for irregular sampling
+                if outputs.shape[1] < self.args.pred_len:
+                    pad_len = self.args.pred_len - outputs.shape[1]
+                    outputs = np.pad(outputs, ((0, 0), (0, pad_len), (0, 0)), mode='edge')
+                    batch_y = np.pad(batch_y, ((0, 0), (0, pad_len), (0, 0)), mode='edge')
+
                 if test_data.scale and self.args.inverse:
                     shape = batch_y.shape
                     if outputs.shape[-1] != batch_y.shape[-1]:
