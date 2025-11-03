@@ -46,19 +46,93 @@ class DSAttention(nn.Module):
 
 
 class FullAttention(nn.Module):
-    def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False):
+    def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False,
+                 pos_enc=None):
         super(FullAttention, self).__init__()
         self.scale = scale
         self.mask_flag = mask_flag
         self.output_attention = output_attention
         self.dropout = nn.Dropout(attention_dropout)
+        self.pos_enc = pos_enc  # PositionalEmbedding instance for RoPE/relative variants
 
-    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
+    def apply_rotary_emb(self, x, cos, sin):
+        """Apply RoPE rotations to queries or keys."""
+        # x: [B, L, H, E]
+        # cos, sin: [B, L, E] or [L, E]
+        if cos.dim() == 2:
+            cos = cos.unsqueeze(0).unsqueeze(2)  # [1, L, 1, E]
+            sin = sin.unsqueeze(0).unsqueeze(2)
+        elif cos.dim() == 3:
+            cos = cos.unsqueeze(2)  # [B, L, 1, E]
+            sin = sin.unsqueeze(2)
+
+        # Rotate: [x1, x2, ...] -> [x1*cos - x2*sin, x1*sin + x2*cos, ...]
+        x1, x2 = x[..., ::2], x[..., 1::2]
+        x_rot = torch.stack([-x2, x1], dim=-1).flatten(-2)
+        return x * cos + x_rot * sin
+
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None, timestamps=None):
         B, L, H, E = queries.shape
         _, S, _, D = values.shape
         scale = self.scale or 1. / sqrt(E)
 
+        # Apply RoPE if needed
+        if self.pos_enc is not None and self.pos_enc.pos_enc_type in ['rope_index', 'rope_time']:
+            # Compute inverse frequencies for the head dimension
+            inv_freq = 1.0 / (10000 ** (torch.arange(0, E, 2, device=queries.device).float() / E))
+
+            if self.pos_enc.pos_enc_type == 'rope_index':
+                # Compute for query and key lengths
+                positions_q = torch.arange(L, device=queries.device, dtype=torch.float32)
+                positions_k = torch.arange(S, device=keys.device, dtype=torch.float32)
+                freqs_q = torch.einsum('i,j->ij', positions_q, inv_freq)
+                freqs_k = torch.einsum('i,j->ij', positions_k, inv_freq)
+                emb_q = torch.cat([freqs_q, freqs_q], dim=-1)
+                emb_k = torch.cat([freqs_k, freqs_k], dim=-1)
+                cos_q, sin_q = torch.cos(emb_q), torch.sin(emb_q)
+                cos_k, sin_k = torch.cos(emb_k), torch.sin(emb_k)
+            else:  # rope_time
+                if timestamps is None:
+                    raise ValueError("rope_time requires timestamps")
+                # Normalize timestamps and compute frequencies
+                t_norm_q = (timestamps[:, :L] - timestamps[:, 0:1]).unsqueeze(-1)
+                t_norm_k = (timestamps[:, :S] - timestamps[:, 0:1]).unsqueeze(-1)
+                freqs_q = t_norm_q * inv_freq
+                freqs_k = t_norm_k * inv_freq
+                emb_q = torch.cat([freqs_q, freqs_q], dim=-1)
+                emb_k = torch.cat([freqs_k, freqs_k], dim=-1)
+                cos_q, sin_q = torch.cos(emb_q), torch.sin(emb_q)
+                cos_k, sin_k = torch.cos(emb_k), torch.sin(emb_k)
+
+            queries = self.apply_rotary_emb(queries, cos_q, sin_q)
+            keys = self.apply_rotary_emb(keys, cos_k, sin_k)
+
         scores = torch.einsum("blhe,bshe->bhls", queries, keys)
+
+        # Add relative position bias if needed
+        if self.pos_enc is not None:
+            if self.pos_enc.pos_enc_type == 'rel_index':
+                # Get relative position bias [L, S, E]
+                pos_q = torch.arange(L, device=queries.device)
+                pos_k = torch.arange(S, device=keys.device)
+                rel_pos = pos_q.unsqueeze(1) - pos_k.unsqueeze(0)  # [L, S]
+                rel_pos_clipped = torch.clamp(rel_pos, -self.pos_enc.max_rel, self.pos_enc.max_rel)
+                rel_pos_clipped = rel_pos_clipped + self.pos_enc.max_rel
+                rel_emb = self.pos_enc.rel_emb(rel_pos_clipped)  # [L, S, d_model]
+                # Project and add to scores: need to average across heads
+                rel_bias = rel_emb.sum(-1) / E  # [L, S]
+                scores = scores + rel_bias.unsqueeze(0).unsqueeze(0)  # [B, H, L, S]
+
+            elif self.pos_enc.pos_enc_type == 'rel_time':
+                if timestamps is None:
+                    raise ValueError("rel_time requires timestamps")
+                # Compute time differences [B, L, S]
+                t_q = timestamps[:, :L].unsqueeze(2)  # [B, L, 1]
+                t_k = timestamps[:, :S].unsqueeze(1)  # [B, 1, S]
+                time_diff = (t_q - t_k).unsqueeze(-1)  # [B, L, S, 1]
+                # Apply sinusoidal encoding
+                time_bias = torch.sin(time_diff * self.pos_enc.div_term).sum(-1) / E  # [B, L, S]
+                scores = scores + time_bias.unsqueeze(1)  # [B, H, L, S]
 
         if self.mask_flag:
             if attn_mask is None:
@@ -191,7 +265,7 @@ class AttentionLayer(nn.Module):
         self.out_projection = nn.Linear(d_values * n_heads, d_model)
         self.n_heads = n_heads
 
-    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None):
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None, timestamps=None):
         B, L, _ = queries.shape
         _, S, _ = keys.shape
         H = self.n_heads
@@ -206,7 +280,8 @@ class AttentionLayer(nn.Module):
             values,
             attn_mask,
             tau=tau,
-            delta=delta
+            delta=delta,
+            timestamps=timestamps
         )
         out = out.view(B, L, -1)
 

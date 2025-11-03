@@ -6,24 +6,69 @@ import math
 
 
 class PositionalEmbedding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
+    def __init__(self, d_model, max_len=5000, pos_enc_type='abs_index'):
         super(PositionalEmbedding, self).__init__()
-        # Compute the positional encodings once in log space.
-        pe = torch.zeros(max_len, d_model).float()
-        pe.require_grad = False
+        self.d_model = d_model
+        self.pos_enc_type = pos_enc_type
 
-        position = torch.arange(0, max_len).float().unsqueeze(1)
-        div_term = (torch.arange(0, d_model, 2).float()
-                    * -(math.log(10000.0) / d_model)).exp()
+        # Precompute frequency terms used by all sinusoidal variants
+        div_term = (torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)).exp()
+        self.register_buffer('div_term', div_term)
 
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        # For index-based absolute: precompute full PE table
+        if pos_enc_type == 'abs_index':
+            pe = torch.zeros(max_len, d_model).float()
+            position = torch.arange(0, max_len).float().unsqueeze(1)
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
+            self.register_buffer('pe', pe.unsqueeze(0))
 
-        pe = pe.unsqueeze(0)
-        self.register_buffer('pe', pe)
+        # For index-based relative: learnable embeddings
+        elif pos_enc_type == 'rel_index':
+            max_rel = 128
+            self.max_rel = max_rel
+            self.rel_emb = nn.Embedding(2 * max_rel + 1, d_model)
 
-    def forward(self, x):
-        return self.pe[:, :x.size(1)]
+        # For RoPE (index or time): just store inverse frequencies
+        elif pos_enc_type in ['rope_index', 'rope_time']:
+            inv_freq = 1.0 / (10000 ** (torch.arange(0, d_model, 2).float() / d_model))
+            self.register_buffer('inv_freq', inv_freq)
+
+    def forward(self, x, timestamps=None):
+        """
+        Args:
+            x: [batch, seq_len, d_model]
+            timestamps: [batch, seq_len] - only used for time-based variants
+        """
+        batch_size, seq_len, _ = x.shape
+
+        if self.pos_enc_type == 'abs_index':
+            return self.pe[:, :seq_len, :].expand(batch_size, -1, -1)
+
+        elif self.pos_enc_type == 'rel_index':
+            # Relative encodings applied in attention, return zeros here
+            return torch.zeros_like(x)
+
+        elif self.pos_enc_type == 'rope_index' or self.pos_enc_type == 'rope_time':
+            # RoPE applied in attention, return zeros here
+            return torch.zeros_like(x)
+
+        elif self.pos_enc_type == 'abs_time':
+            if timestamps is None:
+                raise ValueError("abs_time requires timestamps")
+            # Normalize to start from 0
+            t_norm = (timestamps - timestamps[:, 0:1]).unsqueeze(-1)
+            pe = torch.zeros_like(x)
+            pe[:, :, 0::2] = torch.sin(t_norm * self.div_term)
+            pe[:, :, 1::2] = torch.cos(t_norm * self.div_term)
+            return pe
+
+        elif self.pos_enc_type == 'rel_time':
+            # Relative time encodings applied in attention, return zeros here
+            return torch.zeros_like(x)
+
+        else:
+            raise ValueError(f"Unknown pos_enc_type: {self.pos_enc_type}")
 
 
 class TokenEmbedding(nn.Module):
@@ -107,22 +152,21 @@ class TimeFeatureEmbedding(nn.Module):
 
 
 class DataEmbedding(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1, pos_enc_type='abs_index'):
         super(DataEmbedding, self).__init__()
 
         self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
-        self.position_embedding = PositionalEmbedding(d_model=d_model)
+        self.position_embedding = PositionalEmbedding(d_model=d_model, pos_enc_type=pos_enc_type)
         self.temporal_embedding = TemporalEmbedding(d_model=d_model, embed_type=embed_type,
                                                     freq=freq) if embed_type != 'timeF' else TimeFeatureEmbedding(
             d_model=d_model, embed_type=embed_type, freq=freq)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x, x_mark):
+    def forward(self, x, x_mark, timestamps=None):
         if x_mark is None:
-            x = self.value_embedding(x) + self.position_embedding(x)
+            x = self.value_embedding(x) + self.position_embedding(x, timestamps)
         else:
-            x = self.value_embedding(
-                x) + self.temporal_embedding(x_mark) + self.position_embedding(x)
+            x = self.value_embedding(x) + self.temporal_embedding(x_mark) + self.position_embedding(x, timestamps)
         return self.dropout(x)
 
 

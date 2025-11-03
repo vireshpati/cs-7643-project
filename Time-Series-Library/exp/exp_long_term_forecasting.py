@@ -67,12 +67,19 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         total_loss = []
         self.model.eval()
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(vali_loader):
+            for i, batch in enumerate(vali_loader):
+                # Unpack batch - now includes timestamps
+                batch_x, batch_y, batch_x_mark, batch_y_mark, timestamps_x, timestamps_y, len_x, len_y = batch
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float()
 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
+
+                # Prepare timestamps for time-based encodings
+                use_timestamps = hasattr(self.args, 'pos_encoding_type') and 'time' in self.args.pos_encoding_type
+                timestamps_enc = timestamps_x.float().to(self.device) if use_timestamps else None
+                timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
@@ -80,9 +87,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        if use_timestamps and self.args.model == 'ISaPE':
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                               timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    if use_timestamps and self.args.model == 'ISaPE':
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                           timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                    else:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -138,13 +153,20 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             self.model.train()
             epoch_time = time.time()
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
+            for i, batch in enumerate(train_loader):
+                # Unpack batch - now includes timestamps
+                batch_x, batch_y, batch_x_mark, batch_y_mark, timestamps_x, timestamps_y, len_x, len_y = batch
                 iter_count += 1
                 model_optim.zero_grad()
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
+
+                # Prepare timestamps for time-based encodings
+                use_timestamps = hasattr(self.args, 'pos_encoding_type') and 'time' in self.args.pos_encoding_type
+                timestamps_enc = timestamps_x.float().to(self.device) if use_timestamps else None
+                timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
@@ -162,7 +184,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        if use_timestamps and self.args.model == 'ISaPE':
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                               timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                         f_dim = -1 if self.args.features == 'MS' else 0
                         outputs = outputs[:, -self.args.pred_len:, f_dim:]
@@ -170,7 +196,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         loss = criterion(outputs, batch_y)
                         train_loss.append(loss.item())
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    if use_timestamps and self.args.model == 'ISaPE':
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                           timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                    else:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                     f_dim = -1 if self.args.features == 'MS' else 0
                     outputs = outputs[:, -self.args.pred_len:, f_dim:]
@@ -254,12 +284,19 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         self.model.eval()
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
+            for i, batch in enumerate(test_loader):
+                # Unpack batch - now includes timestamps
+                batch_x, batch_y, batch_x_mark, batch_y_mark, timestamps_x, timestamps_y, len_x, len_y = batch
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
+
+                # Prepare timestamps for time-based encodings
+                use_timestamps = hasattr(self.args, 'pos_encoding_type') and 'time' in self.args.pos_encoding_type
+                timestamps_enc = timestamps_x.float().to(self.device) if use_timestamps else None
+                timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
@@ -267,9 +304,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        if use_timestamps and self.args.model == 'ISaPE':
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                               timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    if use_timestamps and self.args.model == 'ISaPE':
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                           timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                    else:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, :]
