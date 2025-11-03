@@ -71,7 +71,7 @@ class FullAttention(nn.Module):
         x_rot = torch.stack([-x2, x1], dim=-1).flatten(-2)
         return x * cos + x_rot * sin
 
-    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None, timestamps=None):
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None, timestamps=None, timestamps_k=None):
         B, L, H, E = queries.shape
         _, S, _, D = values.shape
         scale = self.scale or 1. / sqrt(E)
@@ -94,9 +94,16 @@ class FullAttention(nn.Module):
             else:  # rope_time
                 if timestamps is None:
                     raise ValueError("rope_time requires timestamps")
+                # Use separate timestamps for keys if provided (cross-attention case)
+                timestamps_q = timestamps
+                if timestamps_k is None:
+                    timestamps_k = timestamps
+
                 # Normalize timestamps and compute frequencies
-                t_norm_q = (timestamps[:, :L] - timestamps[:, 0:1]).unsqueeze(-1)
-                t_norm_k = (timestamps[:, :S] - timestamps[:, 0:1]).unsqueeze(-1)
+                # For queries: use first L timestamps from query timestamps
+                # For keys: use first S timestamps from key timestamps
+                t_norm_q = (timestamps_q[:, :L] - timestamps_q[:, 0:1]).unsqueeze(-1)
+                t_norm_k = (timestamps_k[:, :S] - timestamps_k[:, 0:1]).unsqueeze(-1)
                 freqs_q = t_norm_q * inv_freq
                 freqs_k = t_norm_k * inv_freq
                 emb_q = torch.cat([freqs_q, freqs_q], dim=-1)
@@ -126,9 +133,13 @@ class FullAttention(nn.Module):
             elif self.pos_enc.pos_enc_type == 'rel_time':
                 if timestamps is None:
                     raise ValueError("rel_time requires timestamps")
+                # Use separate timestamps for keys if provided (cross-attention case)
+                timestamps_q = timestamps
+                if timestamps_k is None:
+                    timestamps_k = timestamps
                 # Compute time differences [B, L, S]
-                t_q = timestamps[:, :L].unsqueeze(2)  # [B, L, 1]
-                t_k = timestamps[:, :S].unsqueeze(1)  # [B, 1, S]
+                t_q = timestamps_q[:, :L].unsqueeze(2)  # [B, L, 1]
+                t_k = timestamps_k[:, :S].unsqueeze(1)  # [B, 1, S]
                 time_diff = (t_q - t_k).unsqueeze(-1)  # [B, L, S, 1]
                 # Apply sinusoidal encoding
                 time_bias = torch.sin(time_diff * self.pos_enc.div_term).sum(-1) / E  # [B, L, S]
@@ -265,7 +276,7 @@ class AttentionLayer(nn.Module):
         self.out_projection = nn.Linear(d_values * n_heads, d_model)
         self.n_heads = n_heads
 
-    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None, timestamps=None):
+    def forward(self, queries, keys, values, attn_mask, tau=None, delta=None, timestamps=None, timestamps_k=None):
         B, L, _ = queries.shape
         _, S, _ = keys.shape
         H = self.n_heads
@@ -281,7 +292,8 @@ class AttentionLayer(nn.Module):
             attn_mask,
             tau=tau,
             delta=delta,
-            timestamps=timestamps
+            timestamps=timestamps,
+            timestamps_k=timestamps_k
         )
         out = out.view(B, L, -1)
 

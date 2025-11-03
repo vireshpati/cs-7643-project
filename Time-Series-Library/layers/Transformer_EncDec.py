@@ -109,7 +109,8 @@ class DecoderLayer(nn.Module):
             x, cross, cross,
             attn_mask=cross_mask,
             tau=tau, delta=delta,
-            timestamps=timestamps_enc
+            timestamps=timestamps_dec,
+            timestamps_k=timestamps_enc
         )[0])
 
         y = x = self.norm2(x)
