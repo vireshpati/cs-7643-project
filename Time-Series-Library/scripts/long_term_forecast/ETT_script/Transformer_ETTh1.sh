@@ -5,13 +5,13 @@ model_name=Transformer
 
 pred_len_list=(96 192 336 720)
 
-e_layers_list=(2)
+e_layers_list=(3)
 n_heads_list=(8)
-d_model_list=(128)
+d_model_list=(512)
 
-dropout_list=(0.1)
-batch_size_list=(64)
-learning_rate_list=(0.0001)
+dropout_list=(0.15)
+batch_size_list=(128)
+learning_rate_list=(0.0005)
 
 
 for pred_len in "${pred_len_list[@]}"; do
@@ -48,7 +48,7 @@ for pred_len in "${pred_len_list[@]}"; do
                 --des 'Exp' \
                 --itr 1 \
                 --train_epochs 100 \
-                --patience 5 
+                --patience 10
             done
           done
         done
