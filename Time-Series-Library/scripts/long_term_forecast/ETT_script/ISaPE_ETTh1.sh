@@ -4,9 +4,11 @@ model_name=ISaPE
 
 
 pos_encoding_list=(abs_index rel_index rope_index abs_time rel_time rope_time) # lot_rope
-pred_len_list=(96 192 336 720)
+# pred_len_list=(96 192 336 720)
+pred_len_list=(96)
 
-irregular_sampling_list=(none uniform bursty adaptive)
+# irregular_sampling_list=(none uniform bursty adaptive)
+irregular_sampling_list=(uniform bursty adaptive)
 
 
 irregular_missing_rate=0.3 # for uniform pattern
@@ -73,8 +75,8 @@ for pos_encoding_type in "${pos_encoding_list[@]}"; do
                     --irregular_p_obs_to_miss $irregular_p_obs_to_miss \
                     --irregular_target_retention $irregular_target_retention \
                     --irregular_window_size $irregular_window_size \
-                    --irregular_seed 42 \
-                    done
+                    --irregular_seed 42 
+                done
               done
             done
           done
