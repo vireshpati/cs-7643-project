@@ -41,6 +41,7 @@ for pos_encoding_type in "${pos_encoding_list[@]}"; do
                   --dropout $dropout \
                   --batch_size $batch_size \
                   --learning_rate $learning_rate \
+                  --pos_encoding_type $pos_encoding_type \
                   --d_layers 1 \
                   --factor 3 \
                   --enc_in 7 \
