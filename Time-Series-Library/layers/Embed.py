@@ -37,8 +37,11 @@ class PositionalEmbedding(nn.Module):
     def forward(self, x, timestamps=None):
         """
         Args:
-            x: [batch, seq_len, d_model]
+            x: [batch, seq_len, c_in] - input features
             timestamps: [batch, seq_len] - only used for time-based variants
+
+        Returns:
+            [batch, seq_len, d_model] - positional encoding
         """
         batch_size, seq_len, _ = x.shape
 
@@ -47,25 +50,25 @@ class PositionalEmbedding(nn.Module):
 
         elif self.pos_enc_type == 'rel_index':
             # Relative encodings applied in attention, return zeros here
-            return torch.zeros_like(x)
+            return torch.zeros(batch_size, seq_len, self.d_model, device=x.device, dtype=x.dtype)
 
         elif self.pos_enc_type == 'rope_index' or self.pos_enc_type == 'rope_time':
             # RoPE applied in attention, return zeros here
-            return torch.zeros_like(x)
+            return torch.zeros(batch_size, seq_len, self.d_model, device=x.device, dtype=x.dtype)
 
         elif self.pos_enc_type == 'abs_time':
             if timestamps is None:
                 raise ValueError("abs_time requires timestamps")
             # Normalize to start from 0
             t_norm = (timestamps - timestamps[:, 0:1]).unsqueeze(-1)
-            pe = torch.zeros_like(x)
+            pe = torch.zeros(batch_size, seq_len, self.d_model, device=x.device, dtype=x.dtype)
             pe[:, :, 0::2] = torch.sin(t_norm * self.div_term)
             pe[:, :, 1::2] = torch.cos(t_norm * self.div_term)
             return pe
 
         elif self.pos_enc_type == 'rel_time':
             # Relative time encodings applied in attention, return zeros here
-            return torch.zeros_like(x)
+            return torch.zeros(batch_size, seq_len, self.d_model, device=x.device, dtype=x.dtype)
 
         else:
             raise ValueError(f"Unknown pos_enc_type: {self.pos_enc_type}")
