@@ -82,8 +82,18 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
 
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                # Handle irregular sampling: use actual sequence length instead of fixed label_len/pred_len
+                actual_seq_len = batch_y.shape[1]
+                if actual_seq_len == self.args.label_len + self.args.pred_len:
+                    # Regular sampling case
+                    dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                    dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                else:
+                    # Irregular sampling case: use actual observed sequence
+                    # Split observed sequence proportionally
+                    split_point = min(self.args.label_len, actual_seq_len)
+                    dec_inp = torch.cat([batch_y[:, :split_point, :],
+                                       torch.zeros_like(batch_y[:, split_point:, :])], dim=1).float().to(self.device)
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
@@ -169,8 +179,18 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
 
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                # Handle irregular sampling: use actual sequence length instead of fixed label_len/pred_len
+                actual_seq_len = batch_y.shape[1]
+                if actual_seq_len == self.args.label_len + self.args.pred_len:
+                    # Regular sampling case
+                    dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                    dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                else:
+                    # Irregular sampling case: use actual observed sequence
+                    # Split observed sequence proportionally
+                    split_point = min(self.args.label_len, actual_seq_len)
+                    dec_inp = torch.cat([batch_y[:, :split_point, :],
+                                       torch.zeros_like(batch_y[:, split_point:, :])], dim=1).float().to(self.device)
 
                 # Random dropping
                 drop_mask = None
@@ -299,8 +319,18 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
 
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                # Handle irregular sampling: use actual sequence length instead of fixed label_len/pred_len
+                actual_seq_len = batch_y.shape[1]
+                if actual_seq_len == self.args.label_len + self.args.pred_len:
+                    # Regular sampling case
+                    dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                    dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                else:
+                    # Irregular sampling case: use actual observed sequence
+                    # Split observed sequence proportionally
+                    split_point = min(self.args.label_len, actual_seq_len)
+                    dec_inp = torch.cat([batch_y[:, :split_point, :],
+                                       torch.zeros_like(batch_y[:, split_point:, :])], dim=1).float().to(self.device)
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
