@@ -9,6 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from utils.timefeatures import time_features
 from data_provider.m4 import M4Dataset, M4Meta
 from data_provider.uea import subsample, interpolate_missing, Normalizer
+from data_provider.irregular_sampling_mixin import IrregularSamplingMixin
 from sktime.datasets import load_from_tsfile_to_dataframe
 import warnings
 from utils.augmentation import run_augmentation_single
@@ -16,7 +17,7 @@ from utils.augmentation import run_augmentation_single
 warnings.filterwarnings('ignore')
 
 
-class Dataset_ETT_hour(Dataset):
+class Dataset_ETT_hour(Dataset, IrregularSamplingMixin):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
                  target='OT', scale=True, timeenc=0, freq='h', seasonal_patterns=None):
@@ -71,6 +72,10 @@ class Dataset_ETT_hour(Dataset):
 
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
+
+        # Store original timestamps for irregular sampling
+        self.timestamps = df_stamp['date'].values
+
         if self.timeenc == 0:
             df_stamp['month'] = df_stamp.date.apply(lambda row: row.month, 1)
             df_stamp['day'] = df_stamp.date.apply(lambda row: row.day, 1)
@@ -89,18 +94,21 @@ class Dataset_ETT_hour(Dataset):
 
         self.data_stamp = data_stamp
 
+        # Apply irregular sampling using mixin
+        self.irregular_sampling = getattr(self.args, 'irregular_sampling_pattern', 'none')
+        self.observation_mask = self.setup_irregular_sampling(self.args, self.data_x, self.timestamps)
+
     def __getitem__(self, index):
         s_begin = index
         s_end = s_begin + self.seq_len
         r_begin = s_end - self.label_len
         r_end = r_begin + self.label_len + self.pred_len
 
-        seq_x = self.data_x[s_begin:s_end]
-        seq_y = self.data_y[r_begin:r_end]
-        seq_x_mark = self.data_stamp[s_begin:s_end]
-        seq_y_mark = self.data_stamp[r_begin:r_end]
-
-        return seq_x, seq_y, seq_x_mark, seq_y_mark
+        return self.get_item_with_irregular_sampling(
+            self.data_x, self.data_y, self.data_stamp, self.timestamps,
+            self.observation_mask, s_begin, s_end, r_begin, r_end,
+            self.irregular_sampling
+        )
 
     def __len__(self):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
@@ -109,7 +117,7 @@ class Dataset_ETT_hour(Dataset):
         return self.scaler.inverse_transform(data)
 
 
-class Dataset_ETT_minute(Dataset):
+class Dataset_ETT_minute(Dataset, IrregularSamplingMixin):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTm1.csv',
                  target='OT', scale=True, timeenc=0, freq='t', seasonal_patterns=None):
@@ -164,6 +172,10 @@ class Dataset_ETT_minute(Dataset):
 
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
+
+        # Store original timestamps for irregular sampling
+        self.timestamps = df_stamp['date'].values
+
         if self.timeenc == 0:
             df_stamp['month'] = df_stamp.date.apply(lambda row: row.month, 1)
             df_stamp['day'] = df_stamp.date.apply(lambda row: row.day, 1)
@@ -184,18 +196,21 @@ class Dataset_ETT_minute(Dataset):
 
         self.data_stamp = data_stamp
 
+        # Apply irregular sampling using mixin
+        self.irregular_sampling = getattr(self.args, 'irregular_sampling_pattern', 'none')
+        self.observation_mask = self.setup_irregular_sampling(self.args, self.data_x, self.timestamps)
+
     def __getitem__(self, index):
         s_begin = index
         s_end = s_begin + self.seq_len
         r_begin = s_end - self.label_len
         r_end = r_begin + self.label_len + self.pred_len
 
-        seq_x = self.data_x[s_begin:s_end]
-        seq_y = self.data_y[r_begin:r_end]
-        seq_x_mark = self.data_stamp[s_begin:s_end]
-        seq_y_mark = self.data_stamp[r_begin:r_end]
-
-        return seq_x, seq_y, seq_x_mark, seq_y_mark
+        return self.get_item_with_irregular_sampling(
+            self.data_x, self.data_y, self.data_stamp, self.timestamps,
+            self.observation_mask, s_begin, s_end, r_begin, r_end,
+            self.irregular_sampling
+        )
 
     def __len__(self):
         return len(self.data_x) - self.seq_len - self.pred_len + 1
@@ -204,7 +219,7 @@ class Dataset_ETT_minute(Dataset):
         return self.scaler.inverse_transform(data)
 
 
-class Dataset_Custom(Dataset):
+class Dataset_Custom(Dataset, IrregularSamplingMixin):
     def __init__(self, args, root_path, flag='train', size=None,
                  features='S', data_path='ETTh1.csv',
                  target='OT', scale=True, timeenc=0, freq='h', seasonal_patterns=None):
@@ -269,6 +284,10 @@ class Dataset_Custom(Dataset):
 
         df_stamp = df_raw[['date']][border1:border2]
         df_stamp['date'] = pd.to_datetime(df_stamp.date)
+
+        # Store original timestamps for irregular sampling
+        self.timestamps = df_stamp['date'].values
+
         if self.timeenc == 0:
             df_stamp['month'] = df_stamp.date.apply(lambda row: row.month, 1)
             df_stamp['day'] = df_stamp.date.apply(lambda row: row.day, 1)
@@ -287,18 +306,21 @@ class Dataset_Custom(Dataset):
 
         self.data_stamp = data_stamp
 
+        # Apply irregular sampling using mixin
+        self.irregular_sampling = getattr(self.args, 'irregular_sampling_pattern', 'none')
+        self.observation_mask = self.setup_irregular_sampling(self.args, self.data_x, self.timestamps)
+
     def __getitem__(self, index):
         s_begin = index
         s_end = s_begin + self.seq_len
         r_begin = s_end - self.label_len
         r_end = r_begin + self.label_len + self.pred_len
 
-        seq_x = self.data_x[s_begin:s_end]
-        seq_y = self.data_y[r_begin:r_end]
-        seq_x_mark = self.data_stamp[s_begin:s_end]
-        seq_y_mark = self.data_stamp[r_begin:r_end]
-
-        return seq_x, seq_y, seq_x_mark, seq_y_mark
+        return self.get_item_with_irregular_sampling(
+            self.data_x, self.data_y, self.data_stamp, self.timestamps,
+            self.observation_mask, s_begin, s_end, r_begin, r_end,
+            self.irregular_sampling
+        )
 
     def __len__(self):
         return len(self.data_x) - self.seq_len - self.pred_len + 1

@@ -123,3 +123,65 @@ def subsample(y, limit=256, factor=2):
     if len(y) > limit:
         return y[::factor].reset_index(drop=True)
     return y
+
+
+def collate_fn_irregular(batch):
+    """
+    Collate function for irregular sampling with variable-length sequences.
+
+    Args:
+        batch: List of 8-tuples from dataset __getitem__:
+            (seq_x, seq_y, seq_x_mark, seq_y_mark, seq_x_delta, seq_y_delta, seq_x_len, seq_y_len)
+
+    Returns:
+        Tuple of padded tensors with padding masks:
+        (seq_x_batch, seq_y_batch, seq_x_mark_batch, seq_y_mark_batch,
+         seq_x_delta_batch, seq_y_delta_batch, x_padding_mask, y_padding_mask)
+    """
+    # Unpack batch
+    seq_x_list, seq_y_list, seq_x_mark_list, seq_y_mark_list, \
+        seq_x_delta_list, seq_y_delta_list, seq_x_len_list, seq_y_len_list = zip(*batch)
+
+    batch_size = len(batch)
+
+    # Find max lengths in batch
+    max_x_len = max(seq_x_len_list)
+    max_y_len = max(seq_y_len_list)
+
+    # Get feature dimensions
+    x_feat_dim = seq_x_list[0].shape[-1]
+    y_feat_dim = seq_y_list[0].shape[-1]
+    x_mark_dim = seq_x_mark_list[0].shape[-1]
+    y_mark_dim = seq_y_mark_list[0].shape[-1]
+
+    # Initialize padded tensors
+    seq_x_batch = torch.zeros(batch_size, max_x_len, x_feat_dim)
+    seq_y_batch = torch.zeros(batch_size, max_y_len, y_feat_dim)
+    seq_x_mark_batch = torch.zeros(batch_size, max_x_len, x_mark_dim)
+    seq_y_mark_batch = torch.zeros(batch_size, max_y_len, y_mark_dim)
+    seq_x_delta_batch = torch.zeros(batch_size, max_x_len)
+    seq_y_delta_batch = torch.zeros(batch_size, max_y_len)
+
+    # Fill in actual data
+    for i in range(batch_size):
+        x_len = seq_x_len_list[i]
+        y_len = seq_y_len_list[i]
+
+        if x_len > 0:
+            seq_x_batch[i, :x_len, :] = torch.from_numpy(seq_x_list[i])
+            seq_x_mark_batch[i, :x_len, :] = torch.from_numpy(seq_x_mark_list[i])
+            seq_x_delta_batch[i, :x_len] = torch.from_numpy(seq_x_delta_list[i])
+
+        if y_len > 0:
+            seq_y_batch[i, :y_len, :] = torch.from_numpy(seq_y_list[i])
+            seq_y_mark_batch[i, :y_len, :] = torch.from_numpy(seq_y_mark_list[i])
+            seq_y_delta_batch[i, :y_len] = torch.from_numpy(seq_y_delta_list[i])
+
+    # Create padding masks (True = keep, False = padding)
+    x_lengths = torch.tensor(seq_x_len_list, dtype=torch.long)
+    y_lengths = torch.tensor(seq_y_len_list, dtype=torch.long)
+    x_padding_mask = padding_mask(x_lengths, max_len=max_x_len)
+    y_padding_mask = padding_mask(y_lengths, max_len=max_y_len)
+
+    return (seq_x_batch, seq_y_batch, seq_x_mark_batch, seq_y_mark_batch,
+            seq_x_delta_batch, seq_y_delta_batch, x_padding_mask, y_padding_mask)

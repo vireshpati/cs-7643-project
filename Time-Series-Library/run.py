@@ -47,8 +47,7 @@ if __name__ == '__main__':
 
     # inputation task
     parser.add_argument('--mask_rate', type=float, default=0.25, help='mask ratio')
-    parser.add_argument('--ablation_rate', type=float, default=0.0, help='csv row ablation [0.0-1.0]')
-
+    
     # anomaly detection task
     parser.add_argument('--anomaly_ratio', type=float, default=0.25, help='prior anomaly ratio (%%)')
 
@@ -73,6 +72,8 @@ if __name__ == '__main__':
     parser.add_argument('--dropout', type=float, default=0.1, help='dropout')
     parser.add_argument('--embed', type=str, default='timeF',
                         help='time features encoding, options:[timeF, fixed, learned]')
+    parser.add_argument('--pos_encoding_type', type=str, default='abs_index',
+                        help='positional encoding type, options:[abs_index, rel_index, rope_index, abs_time, rel_time, rope_time]')
     parser.add_argument('--activation', type=str, default='gelu', help='activation')
     parser.add_argument('--channel_independence', type=int, default=1,
                         help='0: channel dependence 1: channel independence for FreTS model')
@@ -137,6 +138,22 @@ if __name__ == '__main__':
     parser.add_argument('--discsdtw', default=False, action="store_true",
                         help="Discrimitive shapeDTW warp preset augmentation")
     parser.add_argument('--extra_tag', type=str, default="", help="Anything extra")
+
+    # Irregular Sampling
+    parser.add_argument('--irregular_sampling_pattern', type=str, default='none',
+                        help='irregular sampling pattern, options:[none, uniform, bursty, adaptive]')
+    parser.add_argument('--irregular_missing_rate', type=float, default=0.3,
+                        help='missing rate for uniform pattern (0.0 to 1.0)')
+    parser.add_argument('--irregular_p_miss_to_miss', type=float, default=0.8,
+                        help='probability of staying in missing state for bursty pattern')
+    parser.add_argument('--irregular_p_obs_to_miss', type=float, default=0.1,
+                        help='probability of transitioning to missing state for bursty pattern')
+    parser.add_argument('--irregular_window_size', type=int, default=24,
+                        help='window size for computing local variance in adaptive pattern')
+    parser.add_argument('--irregular_target_retention', type=float, default=0.3,
+                        help='target retention rate for adaptive pattern (0.0 to 1.0)')
+    parser.add_argument('--irregular_seed', type=int, default=42,
+                        help='random seed for irregular sampling pattern generation')
 
     # TimeXer
     parser.add_argument('--patch_len', type=int, default=16, help='patch length')

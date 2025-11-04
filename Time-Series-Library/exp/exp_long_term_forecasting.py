@@ -33,37 +33,86 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return data_set, data_loader
 
     def _select_optimizer(self):
-        model_optim = optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
+        model_optim = optim.AdamW(self.model.parameters(), lr=self.args.learning_rate, betas=(0.9, 0.95),weight_decay=1e-1) #nanoGPT configuration: https://github.com/karpathy/nanoGPT/
         return model_optim
 
     def _select_criterion(self):
         criterion = nn.MSELoss()
         return criterion
+
+    def _get_lr_scheduler(self, optimizer, train_steps):
+
+        warmup_epochs=getattr(self.args, "warmup_epochs", 2)
+
+        def lr_lambda(current_epoch):
+            total_steps=self.args.train_epochs * train_steps
+            warmup_steps=warmup_epochs * train_steps
+            
+            #Linear warmup
+            if current_epoch < warmup_steps:
+                return float(current_epoch) / float(max(1, warmup_steps))
+         
+            # Linear decay
+            progrss = float(current_epoch - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return max(0.0, (1.0-progrss))
+        
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        return scheduler
+      
+        
+
  
 
     def vali(self, vali_data, vali_loader, criterion):
         total_loss = []
         self.model.eval()
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(vali_loader):
+            for i, batch in enumerate(vali_loader):
+                # Unpack batch - now includes timestamps
+                batch_x, batch_y, batch_x_mark, batch_y_mark, timestamps_x, timestamps_y, len_x, len_y = batch
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float()
 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
+                # Prepare timestamps for time-based encodings
+                use_timestamps = hasattr(self.args, 'pos_encoding_type') and 'time' in self.args.pos_encoding_type
+                timestamps_enc = timestamps_x.float().to(self.device) if use_timestamps else None
+                timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
+
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                # Handle irregular sampling: use actual sequence length instead of fixed label_len/pred_len
+                actual_seq_len = batch_y.shape[1]
+                if actual_seq_len == self.args.label_len + self.args.pred_len:
+                    # Regular sampling case
+                    dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                    dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                else:
+                    # Irregular sampling case: use actual observed sequence
+                    # Split observed sequence proportionally
+                    split_point = min(self.args.label_len, actual_seq_len)
+                    dec_inp = torch.cat([batch_y[:, :split_point, :],
+                                       torch.zeros_like(batch_y[:, split_point:, :])], dim=1).float().to(self.device)
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        if use_timestamps and self.args.model == 'ISaPE':
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                               timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    if use_timestamps and self.args.model == 'ISaPE':
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                           timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                    else:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                # Handle irregular sampling: outputs may have variable length
+                actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                outputs = outputs[:, -actual_pred_len:, f_dim:]
+                batch_y = batch_y[:, -actual_pred_len:, f_dim:].to(self.device)
 
                 pred = outputs.detach()
                 true = batch_y.detach()
@@ -87,7 +136,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         # Logging config
         wandb_project = self.args.model
         run_name = f"{self.args.model}-{self.args.seq_len}-{self.args.pred_len}"
+        if self.args.des != 'test':
+            run_name = f"{self.args.model}-{self.args.seq_len}-{self.args.pred_len}-{self.args.des[:10]}"
         wandb.init(
+            entity='CS7643F25',
             project=wandb_project,
             name=run_name,
             config=self.args,
@@ -102,6 +154,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
+        scheduler = self._get_lr_scheduler(model_optim, train_steps)
 
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
@@ -112,7 +165,9 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
             self.model.train()
             epoch_time = time.time()
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
+            for i, batch in enumerate(train_loader):
+                # Unpack batch - now includes timestamps
+                batch_x, batch_y, batch_x_mark, batch_y_mark, timestamps_x, timestamps_y, len_x, len_y = batch
                 iter_count += 1
                 model_optim.zero_grad()
                 batch_x = batch_x.float().to(self.device)
@@ -120,26 +175,62 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
+                # Prepare timestamps for time-based encodings
+                use_timestamps = hasattr(self.args, 'pos_encoding_type') and 'time' in self.args.pos_encoding_type
+                timestamps_enc = timestamps_x.float().to(self.device) if use_timestamps else None
+                timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
+
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                # Handle irregular sampling: use actual sequence length instead of fixed label_len/pred_len
+                actual_seq_len = batch_y.shape[1]
+                if actual_seq_len == self.args.label_len + self.args.pred_len:
+                    # Regular sampling case
+                    dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                    dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                else:
+                    # Irregular sampling case: use actual observed sequence
+                    # Split observed sequence proportionally
+                    split_point = min(self.args.label_len, actual_seq_len)
+                    dec_inp = torch.cat([batch_y[:, :split_point, :],
+                                       torch.zeros_like(batch_y[:, split_point:, :])], dim=1).float().to(self.device)
+
+                # Random dropping
+                drop_mask = None
+                if torch.rand(1).item() > 0:
+                    random_drop_rate = torch.rand(1).item()
+                    drop_mask = torch.rand(1, 1, batch_x.shape[2], device=batch_x.device) < 1-random_drop_rate
+                    batch_x = batch_x.masked_fill(drop_mask, 0)
+                    batch_y = batch_y.masked_fill(drop_mask, 0)
+                    batch_x_mark = batch_x_mark.masked_fill(torch.rand(1, 1, batch_x_mark.shape[2], device=batch_x_mark.device) < 1-random_drop_rate, 0)
 
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        if use_timestamps and self.args.model == 'ISaPE':
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                               timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                         f_dim = -1 if self.args.features == 'MS' else 0
-                        outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                        # Handle irregular sampling: outputs may have variable length
+                        actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                        outputs = outputs[:, -actual_pred_len:, f_dim:]
+                        batch_y = batch_y[:, -actual_pred_len:, f_dim:].to(self.device)
                         loss = criterion(outputs, batch_y)
                         train_loss.append(loss.item())
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    if use_timestamps and self.args.model == 'ISaPE':
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                           timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                    else:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                     f_dim = -1 if self.args.features == 'MS' else 0
-                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+                    # Handle irregular sampling: outputs may have variable length
+                    actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                    outputs = outputs[:, -actual_pred_len:, f_dim:]
+                    batch_y = batch_y[:, -actual_pred_len:, f_dim:].to(self.device)
                     loss = criterion(outputs, batch_y)
                     train_loss.append(loss.item())
 
@@ -153,11 +244,15 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                 if self.args.use_amp:
                     scaler.scale(loss).backward()
+                    scaler.unscale_(model_optim)
+                    nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     scaler.step(model_optim)
                     scaler.update()
                 else:
                     loss.backward()
+                    nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     model_optim.step()
+                scheduler.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
@@ -182,7 +277,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 wandb.run.summary["early_stop_epoch"] = epoch + 1
                 break
 
-            adjust_learning_rate(model_optim, epoch + 1, self.args)
+            # adjust_learning_rate(model_optim, epoch + 1, self.args)  # Disabled: using warmup+linear decay scheduler instead
 
         best_model_path = path + '/' + 'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
@@ -215,28 +310,62 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         self.model.eval()
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
+            for i, batch in enumerate(test_loader):
+                # Unpack batch - now includes timestamps
+                batch_x, batch_y, batch_x_mark, batch_y_mark, timestamps_x, timestamps_y, len_x, len_y = batch
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
 
                 batch_x_mark = batch_x_mark.float().to(self.device)
                 batch_y_mark = batch_y_mark.float().to(self.device)
 
+                # Prepare timestamps for time-based encodings
+                use_timestamps = hasattr(self.args, 'pos_encoding_type') and 'time' in self.args.pos_encoding_type
+                timestamps_enc = timestamps_x.float().to(self.device) if use_timestamps else None
+                timestamps_dec = timestamps_y.float().to(self.device) if use_timestamps else None
+
                 # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                # Handle irregular sampling: use actual sequence length instead of fixed label_len/pred_len
+                actual_seq_len = batch_y.shape[1]
+                if actual_seq_len == self.args.label_len + self.args.pred_len:
+                    # Regular sampling case
+                    dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
+                    dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                else:
+                    # Irregular sampling case: use actual observed sequence
+                    # Split observed sequence proportionally
+                    split_point = min(self.args.label_len, actual_seq_len)
+                    dec_inp = torch.cat([batch_y[:, :split_point, :],
+                                       torch.zeros_like(batch_y[:, split_point:, :])], dim=1).float().to(self.device)
                 # encoder - decoder
                 if self.args.use_amp:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                        if use_timestamps and self.args.model == 'ISaPE':
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                               timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                        else:
+                            outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    if use_timestamps and self.args.model == 'ISaPE':
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark,
+                                           timestamps_enc=timestamps_enc, timestamps_dec=timestamps_dec)
+                    else:
+                        outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, :]
-                batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+                # Handle irregular sampling: outputs may have variable length
+                actual_pred_len = min(outputs.shape[1], self.args.pred_len)
+                outputs = outputs[:, -actual_pred_len:, :]
+                batch_y = batch_y[:, -actual_pred_len:, :].to(self.device)
                 outputs = outputs.detach().cpu().numpy()
                 batch_y = batch_y.detach().cpu().numpy()
+
+                # Pad predictions to pred_len if needed for irregular sampling
+                if outputs.shape[1] < self.args.pred_len:
+                    pad_len = self.args.pred_len - outputs.shape[1]
+                    outputs = np.pad(outputs, ((0, 0), (0, pad_len), (0, 0)), mode='edge')
+                    batch_y = np.pad(batch_y, ((0, 0), (0, pad_len), (0, 0)), mode='edge')
+
                 if test_data.scale and self.args.inverse:
                     shape = batch_y.shape
                     if outputs.shape[-1] != batch_y.shape[-1]:
