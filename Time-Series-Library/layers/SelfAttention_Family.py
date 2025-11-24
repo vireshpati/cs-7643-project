@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from math import sqrt
 from utils.masking import TriangularCausalMask, ProbMask
@@ -77,11 +78,12 @@ class FullAttention(nn.Module):
         scale = self.scale or 1. / sqrt(E)
 
         # Apply RoPE if needed
-        if self.pos_enc is not None and self.pos_enc.pos_enc_type in ['rope_index', 'rope_time']:
+        if self.pos_enc is not None and self.pos_enc.pos_enc_type in ['rope_index', 'rope_time', 'lot_rope_time']:
             # Compute inverse frequencies for the head dimension
             inv_freq = 1.0 / (10000 ** (torch.arange(0, E, 2, device=queries.device).float() / E))
+            rope_type = self.pos_enc.pos_enc_type
 
-            if self.pos_enc.pos_enc_type == 'rope_index':
+            if rope_type == 'rope_index':
                 # Compute for query and key lengths
                 positions_q = torch.arange(L, device=queries.device, dtype=torch.float32)
                 positions_k = torch.arange(S, device=keys.device, dtype=torch.float32)
@@ -91,7 +93,7 @@ class FullAttention(nn.Module):
                 emb_k = torch.cat([freqs_k, freqs_k], dim=-1)
                 cos_q, sin_q = torch.cos(emb_q), torch.sin(emb_q)
                 cos_k, sin_k = torch.cos(emb_k), torch.sin(emb_k)
-            else:  # rope_time
+            elif rope_type == 'rope_time':
                 if timestamps is None:
                     raise ValueError("rope_time requires timestamps")
                 # Use separate timestamps for keys if provided (cross-attention case)
@@ -106,6 +108,25 @@ class FullAttention(nn.Module):
                 t_norm_k = (timestamps_k[:, :S] - timestamps_k[:, 0:1]).unsqueeze(-1)
                 freqs_q = t_norm_q * inv_freq
                 freqs_k = t_norm_k * inv_freq
+                emb_q = torch.cat([freqs_q, freqs_q], dim=-1)
+                emb_k = torch.cat([freqs_k, freqs_k], dim=-1)
+                cos_q, sin_q = torch.cos(emb_q), torch.sin(emb_q)
+                cos_k, sin_k = torch.cos(emb_k), torch.sin(emb_k)
+            else:  # lot_rope_time
+                if timestamps is None:
+                    raise ValueError("lot_rope_time requires timestamps")
+                timestamps_q = timestamps
+                if timestamps_k is None:
+                    timestamps_k = timestamps
+
+                t_norm_q = (timestamps_q[:, :L] - timestamps_q[:, 0:1]).unsqueeze(-1)
+                t_norm_k = (timestamps_k[:, :S] - timestamps_k[:, 0:1]).unsqueeze(-1)
+
+                alpha = F.softplus(self.pos_enc.log_alpha) + 1e-4
+                tau_q = torch.log1p(torch.clamp(t_norm_q, min=0.0) / alpha)
+                tau_k = torch.log1p(torch.clamp(t_norm_k, min=0.0) / alpha)
+                freqs_q = tau_q * inv_freq
+                freqs_k = tau_k * inv_freq
                 emb_q = torch.cat([freqs_q, freqs_q], dim=-1)
                 emb_k = torch.cat([freqs_k, freqs_k], dim=-1)
                 cos_q, sin_q = torch.cos(emb_q), torch.sin(emb_q)

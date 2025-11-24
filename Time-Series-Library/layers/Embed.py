@@ -29,10 +29,12 @@ class PositionalEmbedding(nn.Module):
             self.max_rel = max_rel
             self.rel_emb = nn.Embedding(2 * max_rel + 1, d_model)
 
-        # For RoPE (index or time): just store inverse frequencies
-        elif pos_enc_type in ['rope_index', 'rope_time']:
+        # For RoPE (index, time, or log-time): store inverse frequencies (and log-scale for log-time)
+        elif pos_enc_type in ['rope_index', 'rope_time', 'lot_rope_time']:
             inv_freq = 1.0 / (10000 ** (torch.arange(0, d_model, 2).float() / d_model))
             self.register_buffer('inv_freq', inv_freq)
+            if pos_enc_type == 'lot_rope_time':
+                self.log_alpha = nn.Parameter(torch.zeros(1))
 
     def forward(self, x, timestamps=None):
         """
@@ -52,7 +54,7 @@ class PositionalEmbedding(nn.Module):
             # Relative encodings applied in attention, return zeros here
             return torch.zeros(batch_size, seq_len, self.d_model, device=x.device, dtype=x.dtype)
 
-        elif self.pos_enc_type == 'rope_index' or self.pos_enc_type == 'rope_time':
+        elif self.pos_enc_type in ['rope_index', 'rope_time', 'lot_rope_time']:
             # RoPE applied in attention, return zeros here
             return torch.zeros(batch_size, seq_len, self.d_model, device=x.device, dtype=x.dtype)
 
