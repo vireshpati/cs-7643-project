@@ -3,7 +3,7 @@ export CUDA_VISIBLE_DEVICES=0
 model_name=ISaPE
 
 
-pos_encoding_list=(abs_index rel_index rope_index abs_time rel_time rope_time) # lot_rope
+pos_encoding_list=(abs_index rel_index rope_index abs_time rel_time rope_time lot_rope_time)
 pred_len_list=(96 192 336 720)
 
 # irregular_sampling_list=(none uniform bursty adaptive)
