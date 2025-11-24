@@ -6,13 +6,13 @@ model_name=ISaPE
 pos_encoding_list=(abs_index rel_index rope_index abs_time rel_time rope_time) # lot_rope
 pred_len_list=(96 192 336 720)
 
-e_layers_list=(2)
-n_heads_list=(4)
-d_model_list=(64)
+e_layers_list=(3)
+n_heads_list=(8)
+d_model_list=(32)
 
-dropout_list=(0.3)
+dropout_list=(0.1)
 batch_size_list=(32)
-learning_rate_list=(0.0001)
+learning_rate_list=(0.0005)
 
 for pos_encoding_type in "${pos_encoding_list[@]}"; do
   for pred_len in "${pred_len_list[@]}"; do
